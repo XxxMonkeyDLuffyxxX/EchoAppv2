@@ -18,15 +18,10 @@ package com.eai.echoppv2;
 
  \---------------------------------------------------------------------------------------------**/
 
-import com.sun.org.apache.xerces.internal.impl.dv.util.HexBin;
-import sun.nio.cs.UTF_32;
-
 import java.io.IOException;
-import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.CharBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -35,9 +30,7 @@ import java.nio.channels.spi.SelectorProvider;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.util.*;
-import java.util.concurrent.ThreadFactory;
-import java.util.zip.CRC32;
-import java.util.zip.Checksum;
+
 
 public class EchoClient implements Runnable {
 
@@ -46,7 +39,7 @@ public class EchoClient implements Runnable {
     private Selector selector; //A Selector object for multiplexing
     private ByteBuffer readBuffer = ByteBuffer.allocate(8192); //A ByteBuffer for reading
     private ByteBuffer writeBuffer = ByteBuffer.allocate(8192); //A ByteBuffer for writing
-    private static byte[] packetBytes;
+    private byte[] packetBytes;
     private int port = 10000; //Port used to connect the sockets
     private CharBuffer charBuffer;
     private Charset charset = Charset.defaultCharset(); //Creates a charset for encode and decoding bytes to String
@@ -59,51 +52,8 @@ public class EchoClient implements Runnable {
      * Main method. Launches thread with instance of com.eai.echoppv2.EchoClient and moves control throughout program
      */
     public static void main(String args[]) {
-        String input;
-        int actionCodeInput;
-        Scanner scanner = new Scanner(System.in);
 
         System.out.println("Hello and welcome to EAI Design's Echo application"); //Status message for user
-
-        System.out.println("Please select an action code: ");
-        System.out.println("[1]: Nothing    [2]: Echo Message   [3]:Print message to screen on server console");
-        actionCodeInput = scanner.nextInt();
-
-        input = scanner.nextLine();//Needed to read next Line character
-
-        //Check user input for valid range. Loops while user enters incorrect value
-        while((actionCodeInput != 1) && (actionCodeInput != 2) && (actionCodeInput != 3)){
-            System.out.println("You have entered " + actionCodeInput + " which is not valid.");
-            System.out.println("Please select an action code: ");
-            System.out.println("[1]: Nothing    [2]: Echo Message   [3]:Print message to screen on server console");
-            actionCodeInput = scanner.nextInt();
-
-            input = scanner.nextLine();//Needed to read next Line character
-        }
-
-        System.out.println("Action code chosen is: " + actionCodeInput);
-
-        //Sets hexadecimal value for int type variable actionCode based on user selection
-        switch(actionCodeInput){
-            case 1:
-                System.out.println("You have requested that the Echo Server do nothing with the message.");
-                break;
-            case 2:
-                System.out.println("You have requested that the Echo Server echo the message");
-                System.out.print("Please type a message to echo: \n"); //Scan user input echo
-                input = scanner.nextLine();
-                break;
-            case 3:
-                System.out.println("You have requested that the Echo Server print the message.");
-                System.out.print("Please type a message to print: \n"); //Scan user input for print
-                input = scanner.nextLine();
-                break;
-        }
-
-        System.out.println("You typed: " + input);
-
-        formatMessage(input, actionCodeInput);//Calls format message method
-
 
         try {
             //Starts a new thread which launches an instance of EchoClient
@@ -118,13 +68,7 @@ public class EchoClient implements Runnable {
     public EchoClient(InetAddress serverAddress, int port) throws Exception {
         this.serverAddress = serverAddress;
         this.port = port;
-
-        /********************************************/
-        System.out.println("Buck should stop here.");
-        /********************************************/
-
-        Thread.interrupted();
-        //this.selector = this.initSelector();
+        this.selector = this.initSelector();
     }
 
     /**
@@ -142,17 +86,15 @@ public class EchoClient implements Runnable {
 
         //Sets IP Address of current Server
         this.serverAddress = InetAddress.getByName("168.168.1.155"); //hostAddress.getLocalHost();
+        System.out.println("Echo Test Client initialized");
 
         //Binds client socket to the specified port and Server IP
         socketChannel.connect(new InetSocketAddress(serverAddress, port));
         System.out.println("Will attempt to connect to Echo Server @ IP: " + serverAddress.toString() + " and port: " +
             port);
 
-        //Registers this client channel with the Selector and advises an interest in connecting to a server
-        System.out.println("Echo Test Client initialized...");
+        //Registers this client channel with the Selector and advises to selector an interest in connecting to a server
         socketChannel.register(socketSelector, SelectionKey.OP_CONNECT);
-
-        System.out.println("Waiting for connections...");
         return socketSelector; //Returns new Selector object
     }
 
@@ -164,10 +106,11 @@ public class EchoClient implements Runnable {
 
         try {
             while (!Thread.interrupted()) {
+
                 selector.select(TIMEOUT);
 
                 Iterator selectedKeys = this.selector.selectedKeys().iterator();//Creates a key iterator object to cycle
-                System.out.println("Cycling through keys...");
+                System.out.println("Waiting for a new key from Selector");
 
                 //Cycle through the queue of keys from the selector
                 while (selectedKeys.hasNext()) {
@@ -193,7 +136,7 @@ public class EchoClient implements Runnable {
 
                     if (key.isWritable()){
                         System.out.println("Checking if key is writable...");
-                        this.write(key);
+                        this.write(key);//Are we writing?
                     }
                 }
             }
@@ -230,7 +173,28 @@ public class EchoClient implements Runnable {
     }
 
     public void write(SelectionKey key) throws IOException{
+        MsgFormmater echoMessage = new MsgFormmater();
+        byte[] message;
+
+        echoMessage.getEchoMessage();
+
+
+
         SocketChannel socketChannel = (SocketChannel) key.channel();
+
+        try {
+            echoMessage.printMessage(packetBytes);
+        }catch(Exception e){
+            e.printStackTrace();
+        }
+
+
+
+        message = null;
+
+        //******************************************************
+        Thread.interrupted();
+        //******************************************************
 
         //Wrap the entire Byte array packetBytes in a ByteBuffer and send to server via channel
         writeBuffer = ByteBuffer.wrap(packetBytes);
@@ -277,85 +241,5 @@ public class EchoClient implements Runnable {
         System.out.println("Server said: " + serverMessage);//Prints to console what the server echos back
     }
 
-    private static byte[] formatMessage(String input, int actionCodeInput){
-        int msgLength;
-        int  msgActionCode;
-        String msgPayload;
-        byte[] tempPacketBytes = packetBytes;
-
-        userInput = input;
-        actionCode = actionCodeInput;
-
-        ByteBuffer packBuffer = ByteBuffer.allocate(8192);
-
-
-        msgActionCode = actionCode;//Sets int type variable msgActionCode to action code chosen by user
-
-        msgLength = userInput.length();//Sets int type variable msgLength to length of user input string
-
-        msgPayload = userInput;//Sets an instance variable the current String value of the user's input
-
-        packBuffer.order(ByteOrder.BIG_ENDIAN);//Sets order in which bytes are loaded into Buffer(and later Byte arrays)
-
-
-        packBuffer.putInt(msgActionCode, msgLength);//Packs buffer with 32-bit int variables
-
-
-        packBuffer.put(msgPayload.getBytes());//Packs Byte Buffer with bytes of String type variable msgPayload
-
-
-        //Checks to make sure there is a backing array under the Buffer object. Do this so you can compute CRC32 over data
-        try {
-            //Check to see if hasArray is true
-            if(packBuffer.hasArray()){
-                tempPacketBytes = packBuffer.array(); //Sends Buffer data to Byte array
-                packBuffer.clear(); //Reset to zero position in Buffer so we may repack from the beginning after CRC
-            }else{
-                System.out.println("An error has occurred and intended byte buffer has no underlying array.");
-                System.out.println("Closing program. Please reopen and try again.");
-                Thread.interrupted();//Interrupt thread to stop process
-            }
-        } catch(Exception e){
-            e.printStackTrace();
-        }
-
-        Checksum checksum = new CRC32(); //New Checksum object
-        checksum.update(tempPacketBytes, 0, tempPacketBytes.length);//Generate a new CRC32 checksum
-        long checksumValue = checksum.getValue(); //Convert the value of the check sum to a long type variable
-        System.out.println("Checksum value is: " + checksumValue);
-
-        //Pack Buffer with data from previous array and add checksum
-        packBuffer.put(tempPacketBytes);
-        packBuffer.compact();
-        packBuffer.putLong(checksumValue);
-        System.out.println(packBuffer.capacity() + "\n" + packBuffer.position());
-
-        packetBytes = packBuffer.array();//Sets byte array variable packBytes to underlying array of Byte Buffer
-        try{
-            printMessage(packetBytes);
-        }catch (Exception e){
-            e.printStackTrace();
-        }
-
-        packBuffer.flip();
-        System.out.println(1);
-
-        return packetBytes;
-    }
-
-    public static void printMessage(byte[] packetBytes)throws Exception{
-
-        //Prints out contents of byte array
-        System.out.println("Sending: <<<---- "  + packetBytes.toString() + " ---->>> to Echo Server");
-
-
-        for(int i = 0; i < packetBytes.length; i++){
-            System.out.print(i + "." + packetBytes[i] + " | ");
-            if(i >= ((packetBytes.length)/2)){
-                System.out.print(i + "." + packetBytes[i] + " | ");
-            }
-
-        }
-    }
 }
 
