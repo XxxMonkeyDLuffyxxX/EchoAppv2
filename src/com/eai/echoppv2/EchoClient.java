@@ -1,15 +1,15 @@
-package com.eai.echoppv2;
 /**------------------------------------------------------------------------------
  | Author : Dontae Malone
  | Company: EAI Design Services LLC
- | Project: Simple Multiplexing TCP/IP Echo application
+ | Project: Simple Multiplexing TCP/IP Echo application with custom protocol
  | Copyright (c) 2015 EAI Design Services LLC
  ------------------------------------------------------------------------------ */
 /**---------------------------------------------------------------------------------------------
  | Classification: UNCLASSIFIED
  |
- | Abstract: this application is still apart of the chattyKathy application as it will also have
- |echo functionality
+ | Abstract: This class creates client for the Echo App. Using it's methods, the user is able to
+ | create a packet message to be sent over a ethernet network using a custom protocol over TCP/IP
+ | to a server implementing the same protocol
  |
  \---------------------------------------------------------------------------------------------*/
 /**---------------------------------------------------------------------------------------------
@@ -18,9 +18,13 @@ package com.eai.echoppv2;
 
  \---------------------------------------------------------------------------------------------**/
 
+package com.eai.echoppv2;
+
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.SelectionKey;
@@ -34,48 +38,166 @@ import java.util.*;
 
 public class EchoClient implements Runnable {
 
-    private InetAddress serverAddress; //IP Address of the Server
-    private SocketChannel socketChannel; //A socket for the client to connect
-    private Selector selector; //A Selector object for multiplexing
-    private ByteBuffer readBuffer = ByteBuffer.allocate(8192); //A ByteBuffer for reading
-    private ByteBuffer writeBuffer = ByteBuffer.allocate(8192); //A ByteBuffer for writing
-    private byte[] packetBytes;
-    private int port = 10000; //Port used to connect the sockets
+    private InetAddress serverAddress;
+    private static InetAddress tempServerAddress;
+    private SocketChannel socketChannel;
+    private Selector selector;
     private CharBuffer charBuffer;
-    private Charset charset = Charset.defaultCharset(); //Creates a charset for encode and decoding bytes to String
-    private CharsetDecoder decoder = charset.newDecoder(); //A decoder for decoding data from Buffers
-    private static String userInput = "";
-    private final int TIMEOUT = 10000;
-    private static int actionCode;
+    private MessageFormatter msgOBJ;
+    private ByteBuffer readBuffer = ByteBuffer.allocate(8192);
+    private ByteBuffer writeBuffer = ByteBuffer.allocate(8192);
+    private static Scanner scannerOBJ;
+    private byte[] packetBytes;
+    private int port;
+    public static int tempPort;
+    public static  String serverIP;
+    private final int TIMEOUT = 10000;//Max time a selector will block for channel to become ready in ms(10 s)
 
-    /**
-     * Main method. Launches thread with instance of com.eai.echoppv2.EchoClient and moves control throughout program
-     */
+    /*=============================================================================================================
+                                            Method Definitions
+    \=============================================================================================================*/
+
+    /**---------------------------------------------------------------------------------------------------
+     |Method: main
+     |Abstract: Main method of EchoClient class. Calls getServer method to begin processing
+     |Return: void, Main method
+     \---------------------------------------------------------------------------------------------------*/
     public static void main(String args[]) {
-
         System.out.println("Hello and welcome to EAI Design's Echo application"); //Status message for user
 
         try {
-            //Starts a new thread which launches an instance of EchoClient
-            new Thread(new EchoClient(null, 10000)).start();
+            //Starts a new thread which launches a new EchoClient object initialized with the given parameters
+            new Thread(new EchoClient(tempServerAddress, tempPort)).start();
         } catch (IOException ie) {
             ie.printStackTrace();
         } catch (Exception e) {
-            e.printStackTrace();
+            e.printStackTrace();//Exception handling
         }
     }
 
-    public EchoClient(InetAddress serverAddress, int port) throws Exception {
-        this.serverAddress = serverAddress;
-        this.port = port;
-        this.selector = this.initSelector();
+    /**-------------------------------------------------------------------------
+     |Method: EchoClient
+     |Abstract: Constructor for EchoClient object
+     |Return: object EchoClient, Constructor accepts an InetAddress object and port number
+     \-------------------------------------------------------------------------*/
+    public EchoClient() throws Exception{
+        serverAddress = getServerIPAddress();
+        port = getServerPort();
+        selector = initSelector();
     }
 
-    /**
-     * Method to create a new Selector for the Client. This is how we create a multiplexing system. The selector
-     * created by this method will have an empty key set until the last line of the method where the register() method
-     * is called and the socket channel is added. The key is set to an OP_CONNECT to connection a server
-     */
+    private InetAddress getServerIPAddress(){
+        getServerIP();
+        verifyServerIP();
+        setServerAddress();
+        return tempServerAddress;
+    }
+
+    /**-------------------------------------------------------------------------
+     |Method: getServerIP
+     |Abstract: Obtains user information for Server's IP and port numbers to connect. Validates user input to ensure
+     |the ranges given are in fact valid based on common networking protocol
+     |Return: void, modifies local variables
+     \-------------------------------------------------------------------------*/
+    private void getServerIP() {
+        //Sets class variables implicitly to null or zero
+        serverIP = "";
+        tempPort = 0;
+
+        scannerOBJ = new Scanner(System.in);//Create a scanner object for IP address and Port
+
+        System.out.println("Please enter the server's name or IP address in 123.456.789 format: ");//Get server IP
+        serverIP = scannerOBJ.nextLine();
+
+        //Get server port
+        System.out.println("Please enter the server's port number (**NOTE: Only port numbers > 1024): ");
+        tempPort = scannerOBJ.nextInt();
+
+        verifyServerIP();
+
+        setServerAddress();
+    }
+
+
+    private void verifyServerIP(){
+        //Boolean variable to loop through user validation
+        boolean keepLoopingPort = false;
+        boolean keepLoopingIP = false;
+
+        //Verifies user inputs are within valid ranges
+        try {
+            tempServerAddress = InetAddress.getByName(serverIP);
+        }catch(UnknownHostException uhe){
+            keepLoopingIP = true;//If an exception is thrown then the IP entered is not a valid IP
+        }
+
+        if(tempPort <= 1024){
+            keepLoopingPort = true;//If the port is not greater than reserved port range, port is not valid
+        }
+
+        int numIterations = 0;//Iterator
+        //Allows user to enter message for processing
+        //Checks user input and sets a max number of times invalid input maybe entered
+        while ((keepLoopingIP) && (numIterations < 3)) {
+            System.out.println("You have entered " + serverIP + " which is not valid.");
+            System.out.println("Please enter the server's name or IP address in 123.456.789 format: ");
+            serverIP = scannerOBJ.nextLine();
+
+            try {
+                tempServerAddress = InetAddress.getByName(serverIP);
+                keepLoopingIP = false;
+            }catch(UnknownHostException uhe){
+                keepLoopingIP = true;//If an exception is thrown then the IP entered is not a valid IP
+            }
+
+            if (numIterations == 2) {
+                System.out.println("Warning. You have used 3 tries already. Closing program.");
+                System.exit(-1);
+            }
+            keepLoopingIP = false;
+            numIterations++;
+        }
+
+        numIterations = 0;
+        //Allows user to enter message for processing
+        //Checks user input and sets a max number of times invalid input maybe entered
+        while ((keepLoopingPort) && (numIterations < 3)) {
+            System.out.println("You have entered " + tempPort + " which is not valid.");
+            System.out.println("Please enter the server's port number (**NOTE: Only port numbers > 1024): ");
+            tempPort = scannerOBJ.nextInt();
+
+            if(tempPort <= 1024){
+                keepLoopingPort = true;//If the port is not greater than reserved port range, port is not valid
+            }
+            else{
+                keepLoopingPort = false;//Port is within valid range
+            }
+
+            if (numIterations == 2) {
+                System.out.println("Warning. You have used 3 tries already. Closing program.");
+                System.exit(-1);
+            }
+            numIterations++;
+        }
+
+        System.out.println("You have entered IP: " + serverIP + " and port: " + tempPort);//Prints out server IP and port
+    }
+
+    private void setServerAddress(){
+      getServerPort();
+    }
+
+    private int getServerPort(){
+        return tempPort;
+    }
+
+    /**-------------------------------------------------------------------------
+     |Method: initSelector
+     |Abstract:  Method to create a new Selector for the Client. This is how we create a multiplexing system. The
+     |selector created by this method will have an empty key set until the last line of the method where the register()
+     |method is called and the socket channel is added. The key is set to an OP_CONNECT to connection a server
+     |Return: object Selector, Creates a new Selector with required settings
+     \-------------------------------------------------------------------------*/
     private Selector initSelector() throws Exception {
         //Creates a new selector using the system's default provider to do so
         Selector socketSelector = SelectorProvider.provider().openSelector();
@@ -140,8 +262,11 @@ public class EchoClient implements Runnable {
                     }
                 }
             }
+        }catch(IOException ioe){
+            System.out.println("Unable to process key because it was cancelled. Likely unable to connect to Echo Server");
+            ioe.printStackTrace();
         }catch(Exception e){
-            e.printStackTrace();
+            System.out.println("Process has been interrupted.");
         }
     }
 
@@ -152,49 +277,49 @@ public class EchoClient implements Runnable {
      * attempts a connection and configures the channel to non-blocking. I have included additional comments where
      * it necessitates
      */
-    public void connect(SelectionKey key)throws IOException{
+    public void connect(SelectionKey key)throws IOException {
         SocketChannel socketChannel = (SocketChannel) key.channel();
+        try {
+            //Verifies that the socket is connected with the Echo server
+            if (socketChannel.isConnectionPending()) {
+                socketChannel.finishConnect();
+            }
 
-        //Verifies that the socket is connected with the Echo server
-        if(socketChannel.isConnectionPending()){
-            socketChannel.finishConnect();
+            //Configures Channel to non-blocking
+            socketChannel.configureBlocking(false);
+
+            //Registers the channel with the selector and sets a request for WRITE operation
+            socketChannel.register(this.selector, SelectionKey.OP_WRITE);
+
+            //Prints to console a status message of a connection
+            System.out.println("Connecting to Server at: " + socketChannel.socket().getRemoteSocketAddress().toString());
+
+            System.out.println("Now connected to Server on: " + socketChannel.socket().toString());
+        }catch(ConnectException ce){
+            System.out.println("Unable to connect to Echo Server @ IP: " + serverAddress.toString() + " and port:"
+                    + port);
+
+            ce.printStackTrace();
+
+            System.out.println("Closing application. Please try again.");
         }
-
-        //Configures Channel to non-blocking
-        socketChannel.configureBlocking(false);
-
-        //Registers the channel with the selector and sets a request for WRITE operation
-        socketChannel.register(this.selector, SelectionKey.OP_WRITE);
-
-       //Prints to console a status message of a connection
-        System.out.println("Connecting to Server at: " + socketChannel.socket().getRemoteSocketAddress().toString());
-
-        System.out.println("Now connected to Server on: " + socketChannel.socket().toString());
     }
 
     public void write(SelectionKey key) throws IOException{
-        MsgFormmater echoMessage = new MsgFormmater();
-        byte[] message;
+        packetBytes = new byte[8192];
+        msgOBJ = new MessageFormatter();
 
-        echoMessage.getEchoMessage();
+        msgOBJ.getEchoMessage();
 
-
+        msgOBJ.formatMessage(packetBytes);
 
         SocketChannel socketChannel = (SocketChannel) key.channel();
 
-        try {
-            echoMessage.printMessage(packetBytes);
-        }catch(Exception e){
-            e.printStackTrace();
-        }
-
-
-
-        message = null;
-
         //******************************************************
-        Thread.interrupted();
+        //System.exit(-1);
         //******************************************************
+
+        msgOBJ.printMessage(packetBytes);
 
         //Wrap the entire Byte array packetBytes in a ByteBuffer and send to server via channel
         writeBuffer = ByteBuffer.wrap(packetBytes);
@@ -233,13 +358,12 @@ public class EchoClient implements Runnable {
         this.readBuffer.flip(); //Prepare the readBuffer for writing to the CharBuffer
 
         System.out.println("Decoding...");
-        charBuffer = decoder.decode(readBuffer);//Decoding the incoming bytes to the system's native characters
+        //charBuffer = decoder.decode(readBuffer);//Decoding the incoming bytes to the system's native characters
 
         System.out.println("Converting bytes to String...");
         String serverMessage = charBuffer.toString();
 
         System.out.println("Server said: " + serverMessage);//Prints to console what the server echos back
     }
-
 }
 

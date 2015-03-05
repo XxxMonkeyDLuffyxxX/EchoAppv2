@@ -1,4 +1,3 @@
-package com.eai.echoppv2;
 /**------------------------------------------------------------------------------
  | Author : Dontae Malone
  | Company: EAI Design Services LLC
@@ -18,6 +17,8 @@ package com.eai.echoppv2;
 
  \---------------------------------------------------------------------------------------------**/
 
+package com.eai.echoppv2;
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -34,6 +35,7 @@ import java.nio.charset.CharsetEncoder;
 import java.util.Iterator;
 import java.lang.*;
 
+
 public class EchoServer implements Runnable{
 
     private InetAddress hostAddress; //IP Address of server
@@ -46,7 +48,7 @@ public class EchoServer implements Runnable{
     private Charset charset = Charset.defaultCharset(); //Creates a charset for encode and decoding bytes to String
     private CharsetDecoder decoder = charset.newDecoder(); //A decoder for decoding data from Buffers
     private CharsetEncoder encoder = charset.newEncoder(); //An encoder for encoding data from Buffers
-    private final int TIMEOUT = 10000;
+    private final int TIMEOUT = 10000;//Max time a selector will block for channel to become ready in ms(10 s)
 
     /**
      * Main method. Launches thread with instance of com.eai.echoppv2.EchoServer and moves control throughout program
