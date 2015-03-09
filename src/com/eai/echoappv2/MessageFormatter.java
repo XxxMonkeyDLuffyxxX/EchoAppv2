@@ -18,7 +18,7 @@
 
  \---------------------------------------------------------------------------------------------**/
 
-package com.eai.echoppv2;
+package com.eai.echoappv2;
 
 import java.nio.charset.Charset;
 import java.util.Scanner;
@@ -92,7 +92,7 @@ public class MessageFormatter {
 
         //Allows user to enter message for processing
         //Checks user input and sets a max number of times invalid input maybe entered
-        while((keepLooping) && (numInterations < 3)) {
+        while((keepLooping) && (numInterations <= 2)) {
             //Checks actionCodeInput and performs required action based on user's operation selection
             switch (actionCodeInput) {
                 case 1:
@@ -108,6 +108,9 @@ public class MessageFormatter {
                     System.out.print("Please type a message to print: \n"); //Scan user input for print
                     input = scanner.nextLine();
                     break;
+                default:
+                    //Do nothing since nominal
+                    break;
             }
 
             System.out.println("You typed: " + input);
@@ -122,7 +125,7 @@ public class MessageFormatter {
                 keepLooping = false;
             }
             //If this loop runs more than 3 times, terminates the program
-            if (numInterations == 2){
+            if (numInterations == 1){
                 System.out.println("Warning. You have used 3 tries already.");
                 System.exit(-1);
             }
@@ -176,7 +179,7 @@ public class MessageFormatter {
 
     /**----------------------------------------------------------------------------------------------------------------
      |Method: printMessage
-     |Abstract: Method access data from byte array passed in and parses to the appropriate variable based on ICD HEADER
+     |Abstract: Method accesses data from byte array passed in and parses to the appropriate variable based on ICD HEADER
      |and PAYLOAD specifications. Method then prints to screen for view/debugging purposes
      |Return: void, Method only accesses the passed in byte array
      \----------------------------------------------------------------------------------------------------------------*/
