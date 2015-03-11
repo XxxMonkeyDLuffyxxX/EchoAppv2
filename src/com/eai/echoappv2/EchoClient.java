@@ -20,6 +20,7 @@
 
 package com.eai.echoappv2;
 
+import sun.plugin2.message.Message;
 import sun.text.normalizer.UTF16;
 
 import java.io.IOException;
@@ -38,15 +39,12 @@ public class EchoClient implements Runnable {
     private InetAddress serverAddress;
     private SocketChannel socketChannel;
     private Selector selector;
-    private Charset charset = Charset.forName("UTF16");
-    private MessageFormatter msgOBJ;
-    private ByteBuffer readBuffer;
-    private ByteBuffer writeBuffer;
+    private Charset charset = Charset.forName("UTF-8");
     private Scanner scannerOBJ;
-    private final static int PDU_LENGTH = 8192;
-    private static byte[] packetBytes = new byte[PDU_LENGTH];
+    private final int PDU_LENGTH = 8192;
+    private byte[] packetBytes= new byte[PDU_LENGTH];
+    private byte[] message;
     private int port;
-    private int bytesRead, bytesWritten, bytesPutToArray;
     private String serverIP = "";
     private final int TIMEOUT = 10000;//Max time a selector will block for channel to become ready in ms(10 seconds)
 
@@ -271,7 +269,7 @@ public class EchoClient implements Runnable {
         socketChannel = SocketChannel.open();
         socketChannel.configureBlocking(false);
 
-        System.out.println("Echo Test Client initialized...");//Status message to console
+        System.out.println("Echo Client initialized...");//Status message to console
 
          try {
              //Creates a Socket Address object to the user specified and validated Server IP and port of the Echo Server
@@ -284,7 +282,7 @@ public class EchoClient implements Runnable {
          }
 
         //Status message to console with current IP information of the Echo Server
-        System.out.println("Will attempt to connect to Echo Server");
+        System.out.println("Will attempt to connect to the Echo Server");
 
         //Registers this client socket channel with the Selector and advises an interest in connecting to the
         //Echo Server. NOTE: Still no guarantee of connection. Server maybe un-connectable
@@ -351,7 +349,8 @@ public class EchoClient implements Runnable {
                 }
             }
         }catch(IOException ioe){
-            System.out.println("Unable to process key because it was cancelled. Likely unable to connect to Echo Server");
+            System.out.println("Unable to process key because it was cancelled. Likely unable to connect to " +
+                    "Echo Server");//Status message to client about error message
             ioe.printStackTrace();
         }
     }
@@ -366,7 +365,7 @@ public class EchoClient implements Runnable {
      |          WRITE operation with the Selector
      |Return: void, modifies local variables using class variables
      \----------------------------------------------------------------------------------------------------------------*/
-    private void connect(SelectionKey key)throws IOException {
+    private void connect(SelectionKey key) {
         SocketChannel socketChannel = (SocketChannel) key.channel();
 
         //Prints to console a status message of a connection
@@ -389,14 +388,14 @@ public class EchoClient implements Runnable {
 
             System.out.println("Now connected to Server on: " + socketChannel.socket().getRemoteSocketAddress()
                     .toString());//Prints a connection message to console
-        }catch(ConnectException ce){
+        }catch(IOException ioe){
             System.out.println("Unable to connect to Echo Server @ IP: " + serverAddress.toString() + " and port:"
                     + port);//Prints a status update to the console
 
-            ce.printStackTrace();
+            ioe.printStackTrace();
 
             System.out.println("A fatal error has occurred. Closing application. Please try again.");
-            System.exit(-1);
+            System.exit(-1);//Close application
         }
     }
 
@@ -410,9 +409,9 @@ public class EchoClient implements Runnable {
      |          request with the Selector to read the response from the Echo Server
      |Return: void, modifies local variables using class variables and a SocketChannel object
      \--------------------------------------------------------------------------------------------------------------*/
-    private void write(SelectionKey key) throws IOException{
+    private void write(SelectionKey key){
 
-        msgOBJ = new MessageFormatter();//New MessageFormatter object
+        MessageFormatter msgOBJ = new MessageFormatter();//New MessageFormatter object
 
         //Calls the MessageFormatter object getEchoMessage() method to get user information for the Echo Server
         msgOBJ.getEchoMessage();
@@ -424,18 +423,14 @@ public class EchoClient implements Runnable {
 
         msgOBJ.printMessage(packetBytes, PDU_LENGTH);//Print the contents of the entered information
 
-        for(int i = 0; i < packetBytes.length; i++){
-            System.out.print("|" + packetBytes[i] + "|"); // read 1 byte at a time
-        }
-
         //Wrap the entire Byte array, packetBytes, in a ByteBuffer
-        writeBuffer = ByteBuffer.wrap(new byte[packetBytes.length]);
+        ByteBuffer writeBuffer = ByteBuffer.wrap(new byte[packetBytes.length]);
 
         writeBuffer.put(packetBytes);//Putting data in array in ByteBuffer
 
         writeBuffer.flip();//Flip the ByteBuffer so that position isn't equal to limit
 
-        bytesWritten = 0;
+        int bytesWritten = 0;
 
         try {
             bytesWritten = socketChannel.write(writeBuffer);//Send to the channel
@@ -443,9 +438,6 @@ public class EchoClient implements Runnable {
             ioe.printStackTrace();
         }
 
-
-        //Debug message to see how many bytes written to socket
-        System.out.println("***DEBUG*** bytes written: " + bytesWritten);
         writeBuffer.clear();//Reset the write buffer's current position to to zero(reuse memory space)
 
         //Registers with the Selector a READ operation request for Echo Server response
@@ -455,30 +447,22 @@ public class EchoClient implements Runnable {
     /**---------------------------------------------------------------------------------------------------------------
      |Method: read
      |Abstract: This method accepts the a key from the Selector. Opens up a new socket with the information on the key.
-     |          After completion, registers a READ operation request with the Selector to read the response from the
-     |          Echo Server, print it to the screen for the user and ask if the user will continue or cancel. Based on
-     |          the user's response, either calls the write() method to continue or closes the application
+     |          It then reads the incoming bytes from the socket channel, parses those bytes to a byte array and calls
+     |          the messageHandling() method for processing of said bytes
      |Return: void, modifies local variables using class variables and a objects
      \--------------------------------------------------------------------------------------------------------------*/
-    public void read(SelectionKey key) throws IOException {
+    private void read(SelectionKey key){
         SocketChannel socketChannel = (SocketChannel) key.channel();
 
-        //Create a new String object that will hold the Echo Server response using the defined charset class object
-        String text;
+        ByteBuffer readBuffer = ByteBuffer.allocate(8192);//Per custom protocol, max message is 8kb, so size is set
 
-        readBuffer = ByteBuffer.allocate(8192);//Per protocol, max message is 8kb, so size is set
-
-        readBuffer.clear(); //Reset current location to beginning
-
-        System.out.println("Reading from the Buffer...");//Status update to the user
-
-        bytesRead = 0;
+        int bytesRead = 0;//An int type variable to hold how many bytes are read from the socket Channel
 
         try {
-            //Variable to count the data while we scan it in from the socket channel to the ByteBuffer
+            System.out.println("Reading from the Buffer...");//Status update to the user
             bytesRead = socketChannel.read(readBuffer);
 
-            //If there is nothing in the ByteBuffer, continue to end of method
+            //If there is nothing in the ByteBuffer, continue to the end of method.
             if (bytesRead == -1) {
                 System.out.println("Nothing received from server");
             }
@@ -487,43 +471,66 @@ public class EchoClient implements Runnable {
             }
         } catch (IOException ioe) {
             System.out.println("Server closed connection unexpectedly. Force closing connection.");
-            socketChannel.close();//Close socketChannel
-            key.cancel();
+
+            try {
+                socketChannel.close();//Close socketChannel
+            }catch (IOException ioe2){
+                ioe2.printStackTrace();
+            }
+
             return;
         }
 
-
-        System.out.println("**DEBUG** Bytes read: " + bytesRead);
-
         readBuffer.flip(); //Prepare the readBuffer for reading from itself
 
+        //Create a new byte array and fill it with the received bytes from the server
+        message = new byte[readBuffer.remaining()];//Set the size of byte array to size of data in ByteBuffer
+        readBuffer.get(message);//Reading bytes and get the bytes therein
+
+        messageHandling(key);//Call the messageHandler() method to manage received data
+    }
+
+    /**---------------------------------------------------------------------------------------------------------------
+     |Method: messageHandling
+     |Abstract: This method accepts the a key from the Selector. The method is used to handle received bytes from
+     |          the server, convert them to a String and display it on screen for the user. After completion, ask if the
+     |          user will continue or cancel. Based on the user's response, either calls the write() method to continue
+     |          or closes the application
+     |Return: void, modifies local variables using class variables and a objects
+     \--------------------------------------------------------------------------------------------------------------*/
+    private void messageHandling(SelectionKey key){
         System.out.println("Converting bytes to String...");//Status update
 
-        //Constructs a String object and uses the received Echo Server message and the predefined
-        // charset to decode the bytes
-        byte[] message = new byte[readBuffer.remaining()];//Set the size of byte array to size of data in ByteBuffer
-        readBuffer.get(message);//Duplicate the ByteBuffer when reading bytes and get the bytes therein
-        text = new String(message, charset);//Decode the bytes in array to a String object using the predefined charset
+        //Create a new String object that will hold the Echo Server response using the defined charset class object
+        String serverResponse = "";
 
-        System.out.println("Server said: " + text);//Prints to console what the server echos back
+        //Decode the bytes in the byte array to a String object using the predefined charset
+        serverResponse = new String(message, charset);
 
-        String response;//Create a new String to hold user response
-        //Ask the user to continue or shut down the Echo app
+        System.out.println("Server said: " + serverResponse);//Prints server response to the console
+
+        String userResponse;//Create a new String to hold user response
+
+        //Ask the user to continue or shut down the Echo Client app
         System.out.println("Would you like to enter another message?");
         System.out.println("Please type YES or NO: ");
+        userResponse = scannerOBJ.next();
 
-        response = scannerOBJ.next();
-
-        //If the user entered yes or y, regardless of case, call the write() method to get new Echo message input.
+        //If the user enters "yes" or "y", regardless of case or additional text, call the
+        // write() method to get new Echo message input.
         // Otherwise shutdown everything
-        if((response.compareToIgnoreCase("YES") == 0) || (response.charAt(0) == ('Y')) || (response.charAt(0) == ('y'))) {
-            write(key);//Call the write() method and pass in the current key
-        }
-        else{
-            key.cancel();//Cancel the current key object
-            socketChannel.close();//Close the socket channel
-            System.out.println("See ya");
-            System.exit(-1);//Exit the system with the status code of -1
+        try {
+            if ((userResponse.compareToIgnoreCase("YES") == 0) || (userResponse.charAt(0) == ('Y')) ||
+                    (userResponse.charAt(0) == ('y'))) {
+                write(key);//Call the write() method and pass in the current key
+            } else {
+                key.cancel();//Cancel the current key object
+                socketChannel.close();//Close the socket channel
+                System.out.println("See ya");
+                System.exit(0);//Exit the system with the status code of 0
+            }
+        }catch(IOException ioe){
+            ioe.printStackTrace();
         }
     }
 }

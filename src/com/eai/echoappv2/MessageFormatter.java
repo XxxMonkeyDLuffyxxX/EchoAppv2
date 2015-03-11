@@ -32,13 +32,15 @@ public class MessageFormatter {
     private final int cMAXMESSAGELENGTH = 8192;
     private int CRC32Offset;
     private String message = "";
+    private String expectedCRCHex = "";
+    private String currentCRCHex = "";
     private short messageType;
     private short messageLength;
     private long currentCRC32;
     private long expectedCRC;
     private byte[] msgByteArray = new byte[8192];
     private int messageAndHeaderLen;
-    private Charset charset = Charset.defaultCharset();
+    private Charset charset = Charset.forName("UTF-8");
 
     /*=============================================================================================================
                                             Method Definitions
@@ -100,6 +102,8 @@ public class MessageFormatter {
             switch (actionCodeInput) {
                 case 1:
                     System.out.println("You have requested that the Echo Server do nothing with the message.");
+                    System.out.print("Please type a message to send: \n"); //Scan user input for server
+                    input = scanner.nextLine();
                     break;
                 case 2:
                     System.out.println("You have requested that the Echo Server echo the message.");
@@ -168,7 +172,8 @@ public class MessageFormatter {
             packetBytes[i + 4] = msgByteArray[i];
         }
         CRC32Offset = 4 + messageLength;
-        currentCRC32 = getCRC(packetBytes);//Gets CRC for packing
+
+        getCRC(packetBytes);//Gets CRC for packing
 
         //Packs CRC to the last 4B of packetBytes using the messageLength as an offset
         packetBytes[CRC32Offset + 0] = (byte)((currentCRC32>>24) & 0xFF);
@@ -195,8 +200,6 @@ public class MessageFormatter {
         messageLength |= packetBytes[2] <<8;
         messageLength |= packetBytes[3] <<0;
 
-        System.out.println(messageType + " || " + messageLength);
-
         //4B is the size of messageLength and messageType(HEADER).
         //4B plus the known messageLength gives us the remaining bytes for the int CRC32 entered by left shifting
         CRC32Offset = 4 + messageLength;
@@ -213,14 +216,14 @@ public class MessageFormatter {
             //Scans the bytes in packetBytes for payload back into a byteArray to convert to string
             byte[] msgByteArray = new byte[messageLength];
 
-            for (int i = 0; i < messageLength; i++) {
+            for (int i = 0; i < messageLength; i++){
                 msgByteArray[i] = packetBytes[i + 4];
             }
 
             String text = new String(msgByteArray, charset);//Create a new string with the contents of msgByteArray
 
             //Prints out contents parsed from packetBytes to screen for verification
-            String s = String.format("Message Type = 0x%04x, Message Length = 0x%04x, Payload = %s, CRC32 = 0x%04x",
+            String s = String.format("Message Type = 0x%04x, Message Length = 0x%04x, Payload = %s, CRC32 = 0x%08X",
                     messageType, messageLength, text, currentCRC32);
 
             System.out.println(s);
@@ -235,8 +238,12 @@ public class MessageFormatter {
             }
 
             //Prints CRC32
-            s = String.format(", CRC32 = 0x%04x", currentCRC32);
-            System.out.println(s);
+            System.out.print(", CRC32 = 0x");
+            for (int i = 0; i < 4; i++) {
+                currentCRCHex = String.format("%02x", packetBytes[i + CRC32Offset]);
+                System.out.print(currentCRCHex);
+            }
+
         }
 
 
@@ -274,15 +281,24 @@ public class MessageFormatter {
             for(int i = 0; i < tempPacketsBytes.length; i++){
                 tempPacketsBytes[i] = packetBytes[i];// Copy contents from one array temp to another to check CRC
             }
+            //Get CRC32 from byte array in Hex format
+            expectedCRCHex = "0x";//Appends "0x" to beginning of string for proper formatting
 
-            /*getCRC(tempPacketsBytes);//Compute a CRC32 over the bytes received for size of messageAndHeaderLen
+            //Loops through the last 4 bytes of the byte array to get the CRC32
+            for(int i =0; i < 4; i++) {
+
+                String s = String.format("%02X", packetBytes[i + CRC32Offset]);//Gets the bytes in Hex format
+                expectedCRCHex = expectedCRCHex + s;//Concatenates the additional values in Hex format
+            }
+
+            getCRC(tempPacketsBytes);//Compute a CRC32 over the bytes received for size of messageAndHeaderLen
 
             if (!checkCRC()){
                 return false;
             }
             else{
                 //Do Nothing
-            }*/
+            }
         }
 
         return true;
@@ -310,9 +326,10 @@ public class MessageFormatter {
         return messageLength;
     }
 
-    public long getSentMessageCRC(){
+    /*public long getSentMessageCRC(){
         return currentCRC32;
     }
+    */
 
     /**--------------------------------------------------------------------------------------------------------------
      |Method: getCRC
@@ -320,24 +337,27 @@ public class MessageFormatter {
      |array(HEADER and PAYLOAD), computes CRC32 object and converts to long type variable.
      |Return: long CRC32, Method returns long type variable containing CRC32
      \--------------------------------------------------------------------------------------------------------------*/
-    private long getCRC(byte[] packetBytes){
-        Checksum checksum = new CRC32(); //New Checksum object
+    private void getCRC(byte[] packetBytes){
+        int numBytesToProcess = 0;
+        numBytesToProcess = CRC32Offset;
 
-        checksum.update(packetBytes, 0, CRC32Offset);//Generate a new CRC32 checksum
+        CRC32 crc32OBJ = new CRC32(); //New Checksum object
 
-        currentCRC32 = checksum.getValue(); //Convert the value of the check sum to a long type variable
+        //Generate a new CRC32 checksum for the HEADER(4b) and message
+        crc32OBJ.update(packetBytes, 0, numBytesToProcess);
 
-        return currentCRC32;
+        currentCRC32 = (int)crc32OBJ.getValue(); //Convert the value of the check sum to a long type variable
+
+        System.out.print("**DEBUG** CRC in HEX = ");
+        currentCRCHex = String.format("0x%04X", currentCRC32);
+        System.out.println(currentCRCHex);
     }
 
     private boolean checkCRC(){
         boolean isCorrectCRC;
 
-        //int parsedResult = (int) Long.parseLong(hex, 16);
-
-
        //If the expected CRC isn't equal to the current one that was just generated
-        if(Long.compareUnsigned(currentCRC32, expectedCRC) != 0){
+        if(currentCRCHex.compareToIgnoreCase(expectedCRCHex) != 0){
             System.out.println("CRC32 values expected and actual received do not match. The message was not valid.");
             isCorrectCRC = false;
         }
