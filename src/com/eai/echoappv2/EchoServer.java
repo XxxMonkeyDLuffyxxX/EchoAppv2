@@ -20,6 +20,8 @@
 
 package com.eai.echoappv2;
 
+import sun.text.normalizer.UTF16;
+
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetAddress;
@@ -45,17 +47,15 @@ public class EchoServer implements Runnable{
     private InetAddress hostAddress;
     private ServerSocketChannel serverChannel;
     private Selector selector;
-    private ByteBuffer readBuffer = ByteBuffer.allocate(8192);
-    private ByteBuffer writeBuffer = ByteBuffer.allocate(8192);
+    private ByteBuffer readBuffer;
+    private ByteBuffer writeBuffer;
     private int port;
-    private CharBuffer charBuffer;
-    private Charset charset = Charset.defaultCharset();
-    private MessageFormatter msgOBJ;
-    private CharsetDecoder decoder = charset.newDecoder();
-    private CharsetEncoder encoder = charset.newEncoder();
+    private int bytesRead, bytesWritten, bytesPutToArray;
+    private Charset charset = Charset.forName("UTF16");
     private byte[] packetBytes;
     private byte[] msgByteArray;
     private String message = "";
+    private MessageFormatter msgOBJ = new MessageFormatter();
     private final int TIMEOUT = 10000;//Max time a selector will block for channel to become ready in ms(10 seconds)
 
     /*=============================================================================================================
@@ -71,9 +71,9 @@ public class EchoServer implements Runnable{
 
         System.out.println("Hello and welcome to EAI Design's Echo Server application");//Status message for user
 
-            try{
-                //Starts a new thread which launches a new EchoServer object with a predetermined port number
-                new Thread(new EchoServer(null, 10000)).start();
+        try{
+            //Starts a new thread which launches a new EchoServer object with a predetermined port number
+            new Thread(new EchoServer(null, 10000)).start();
         }catch(IOException ie) {
             ie.printStackTrace();
         }catch(Exception e){
@@ -170,7 +170,6 @@ public class EchoServer implements Runnable{
                     //Check the event type of the current key and use the appropriate method as long as key is valid
                     if (!key.isValid()) {
                         System.out.println("This key was not valid...");
-                        continue;//If the key IS NOT valid goes to next key IF there is another key
                     }
 
                     //Are we accepting?
@@ -183,16 +182,25 @@ public class EchoServer implements Runnable{
                     else if (key.isReadable()) {
                         System.out.println("Checking if key is readable...");
                         read(key);//If the key is a readable type, passes key to read() method
-                    } else {
+                    }
+
+                    //Are we writing
+                    else if (key.isWritable()){
+                        System.out.println("Checking if key is writable...");
+                        write(key);//If the key is a readable type, passes key to read() method
+                    }
+
+                    else{
                         //Do nothing
                     }
                 }
             }
         } catch (IOException ioe) {
-            System.out.println("Unable to process key because it was cancelled. Likely unable to connect to Echo Server");
+            System.out.println("Unable to process key because it was cancelled. Likely unable to connect");
             ioe.printStackTrace();
         } catch (Exception e) {
             System.out.println("Process has been interrupted.");
+            e.printStackTrace();
         }
     }
 
@@ -207,31 +215,29 @@ public class EchoServer implements Runnable{
     public void accept(SelectionKey key)throws IOException{
         ServerSocketChannel serverSocketChannel = (ServerSocketChannel) key.channel();
 
+        System.out.println("Connecting...");//Status update
+
         try {
             SocketChannel socketChannel = serverSocketChannel.accept();
-
-            //Configures new socket channel to non-blocking
-            socketChannel.configureBlocking(false);
 
             //Prints to console a status message of a connection
             System.out.println("Received an incoming connection from" + socketChannel.socket().getRemoteSocketAddress());
 
-            System.out.println("Connecting...");
+            //Configures new socket channel to non-blocking
+            socketChannel.configureBlocking(false);
 
-            System.out.println("Registering intent for read operations with the Selector");
+            System.out.println("Connected to client: " + socketChannel.socket().getRemoteSocketAddress());
+
+            System.out.println("Registering to read with the Selector");
 
             //Registers the channel with the Selector and sets a request for any READ operations
             socketChannel.register(selector, SelectionKey.OP_READ);
 
-            System.out.println("Connected to client: " + socketChannel.socket().getRemoteSocketAddress());
+
         }catch(ConnectException ce){
             System.out.println("Unable to connect to Echo Client");//Prints a status update to the console
-
             ce.printStackTrace();
-
-            System.out.println("A fatal error has occurred. Closing application. Please try again.");
         }
-
     }
 
     /**---------------------------------------------------------------------------------------------------------------
@@ -245,164 +251,111 @@ public class EchoServer implements Runnable{
     public void read(SelectionKey key) throws IOException{
         SocketChannel socketChannel = (SocketChannel) key.channel();
 
-        //Variable to hold data while it is scanned in from the socket channel to the ByteBuffer
-        int bytesRead = socketChannel.read(readBuffer);//Read data from channel into ByteBuffer
+        readBuffer = ByteBuffer.allocate(8192);
+        bytesRead = 0;
 
-        while(bytesRead != -1) {
-                System.out.println("Reading from the Buffer...");//Status message printed to output
-                readBuffer.flip(); //Clears the readBuffer for new incoming data from the socket channel(Clear before read)
+        //Prepare the readBuffer for being written to
+        System.out.println("Reading from the Buffer...");//Status message printed to output
 
-            while(readBuffer.hasRemaining()){
-                readBuffer.get(packetBytes);
-                System.out.print(" | " + readBuffer.get() + " | ");
-            }
 
-            int i = 0;
-            while(i <= packetBytes.length){
-                System.out.print(" | " + (char)packetBytes[i] + " | ");
-            }
+        /*Switches ByteBuffer position back to zero and sets limit to where position was -- position now marks the
+        // reading position(beginning of the ByteBuffer) and limit marks how much data was written in the buffer(in this
+        // case, what was read from socketChannel i.e. the limit on how much data can be read)*/
 
-            //Client shut the connection down cleanly so readBuffer has -1 int
-            if (bytesRead == -1) {
-                key.cancel();
-                socketChannel.close();
-                System.out.println("Logout: " + socketChannel.socket().getInetAddress());
-                System.out.println("The remote connection has cleanly shut down. The server is doing the same.");
-            } else {
-                //Do Nothing
-            }
+        bytesRead = socketChannel.read(readBuffer);
+        packetBytes = new byte[bytesRead];
+
+        System.out.println("packetBytes is "+ packetBytes.length + " long.");
+
+        readBuffer.flip();
+
+        while(readBuffer.hasRemaining()){
+            System.out.print((char) readBuffer.get()); // read 1 byte at a time
         }
 
-        readBuffer.clear(); //Prepare the readBuffer for being written to
+        readBuffer.rewind();
 
-        getEchoMessage(key, packetBytes);
 
-        //System.out.println("Decoding...");
-        //charBuffer = decoder.decode(readBuffer);//Decoding the incoming bytes to systems native characters
-    }
 
-    private void getEchoMessage(SelectionKey key, byte[] packetBytes){
-        int CRC32Offset = 0;
-        int _messageLength = 0;
-        int _CRC32 = 0;
-        int _messageType = 0;
+        readBuffer.get(packetBytes);
 
-        //Unpacks first 4B from packetBytes to int variables messageType & messageLength, respectively by left shifting
-        _messageType |= packetBytes[0] <<8;
-        _messageType |= packetBytes[1] <<0;
 
-        _messageLength |= packetBytes[2] <<8;
-        _messageLength |= packetBytes[3] <<0;
+        msgOBJ.printMessage(packetBytes, bytesRead);
 
-        //4B is the size of messageLength and messageType(HEADER).
-        //4B plus the known messageLength gives us the remaining bytes for the int CRC32 entered by left shifting
-        CRC32Offset = 4 + _messageLength;
-
-        _CRC32 |= packetBytes[CRC32Offset + 0] <<24;
-        _CRC32 |= packetBytes[CRC32Offset + 1] <<16;
-        _CRC32 |= packetBytes[CRC32Offset + 2] <<8;
-        _CRC32 |= packetBytes[CRC32Offset + 3] <<0;
-
-        byte[] tempPacketsBytes = new byte[packetBytes.length - _CRC32];
-
-        for(int i = 0; i < packetBytes.length - _CRC32; i++){
-            tempPacketsBytes[i] = packetBytes[i];
-        }
-
-        boolean isCRC = checkCRC(tempPacketsBytes, _CRC32);
-
-        if(!isCRC){
-            System.out.println("CRC32 values expected and actual received do not match. The message was not valid.");
-            close(key);
+        if(!msgOBJ.sentMessageValidator(packetBytes, bytesRead)) {
+            message = " ";
+            message = "The message was not valid. please try again.";
+            write(key);
         }
         else{
-            System.out.println("CRC32 values expected and actual received match. The message is valid");
-        }
-
-        //Scans the bytes in packetBytes for Payload back into a byteArray to convert to string
-        for (int i = 0; i < _messageLength; i++) {
-            msgByteArray[i] = packetBytes[i + 4];
-        }
-        try {
-            switch (_messageType) {
-                case 1:
-                    System.out.println("You have requested that the Echo Server do nothing with the message.");
-                    close(key);
-                    break;
-                case 2:
-                    System.out.println("You have requested that the Echo Server echo the message.");
-                    echoMessage(key, msgByteArray);// Calling echo() method per _messageType
-                    break;
-                case 3:
-                    System.out.println("You have requested that the Echo Server print the message.");
-                    printMessage(key, msgByteArray);//Calling printMessage() method per _messageType
-                    break;
-                default:
-                    System.out.println("Message Type not recognized. Aborting.");
-                    close(key);
-                    break;
-            }
-        }catch(IOException ioe){
-            ioe.printStackTrace();
+            messageHandling(key);
         }
     }
 
-    private boolean checkCRC(byte[] tempPacketBytes, int _CRC32){
-        boolean isCorrectCRC;
-        Checksum checksum = new CRC32(); //New Checksum object
+    private void messageHandling(SelectionKey key){
 
-        checksum.update(tempPacketBytes, 0, tempPacketBytes.length);//Generate a new CRC32 checksum
+        int messageType, messageLength = 0;
 
-        long checksumValue = checksum.getValue(); //Convert the value of the check sum to a long type variable
+        messageType = msgOBJ.getSentMessageType();
 
-        if(checksumValue != _CRC32){
-            isCorrectCRC = false;
+        messageLength = msgOBJ.getSentMessageLength();
+
+        System.out.println("The message was " + messageLength + " bytes long");
+
+        //message = msgOBJ.getSentMessageText(packetBytes);
+
+        switch (messageType){
+            case 1: System.out.println("User has chosen to do nothing with the received message");
+                close(key);
+                break;
+            case 2: System.out.println("User has chosen to echo the received message.");
+                echoMessage(key);
+                break;
+            case 3: System.out.println("User has chosen to print the received message to the console.");
+                System.out.println(message);
+                break;
+            default: System.out.println("The Message Type used is unsupported please try again");
+                break;
         }
-        else{
-            isCorrectCRC = true;
-        }
-
-        return isCorrectCRC;
     }
 
-    private void echoMessage (SelectionKey key, byte[] msgByteArray) throws IOException{
+    private void echoMessage (SelectionKey key){
         SocketChannel socketChannel = (SocketChannel) key.channel();
 
-        System.out.println("Converting bytes to String...");
-
-        message = new String(msgByteArray, charset);//Create a new string with the contents of msgByteArray
-
-        System.out.println("Message received from Client: " + message);
+        msgByteArray = message.getBytes(charset); //Encode the bytes using the predefined charset
 
         try {
-            writeBuffer = ByteBuffer.wrap(msgByteArray);
+            writeBuffer = ByteBuffer.wrap(msgByteArray);//Wrap the byte array in a buffer to send
 
             System.out.println("Echoing bytes to: " + socketChannel.socket().getInetAddress());
 
-            socketChannel.write(writeBuffer);
+            socketChannel.write(writeBuffer);//Sending to the client via socket Channel
 
-            System.out.println("Bytes sent.");
-        }catch(IOException ie){
-            ie.printStackTrace();
+            System.out.println("Bytes sent.");//Status update
+        }catch(IOException ioe){
+            ioe.printStackTrace();
         }
-        writeBuffer.flip();//flips the write buffer to prepare to write again
+        writeBuffer.clear();//Clear the write buffer to prepare to write again
 
-        close(key); //Calls close() method to shut down connection to client
-    }
-
-    private void printMessage(SelectionKey key, byte[] msgByteArray){
-        message = new String(msgByteArray, charset);
-        System.out.println("The message received from the Client was:" + message);
-
-        close(key);
+        key.interestOps(SelectionKey.OP_READ);//Waiting for a read key
     }
 
     private void write(SelectionKey key) throws IOException{
         SocketChannel socketChannel = (SocketChannel) key.channel();
 
-        this.writeBuffer = readBuffer;
+        msgByteArray = message.getBytes(charset); //Encode the bytes using the predefined charset
 
-        socketChannel.write(writeBuffer);
+        try {
+            writeBuffer = ByteBuffer.wrap(msgByteArray);
+            socketChannel.write(writeBuffer);
+        }catch (IOException ioe){
+            ioe.printStackTrace();
+        }
+
+        writeBuffer.clear();//Clear the buffer to reset start at zero
+
+        key.interestOps(SelectionKey.OP_READ);//Waiting for a read key
+
         /**byte[] data = dataTracking.get(socketChannel); //Creates a Byte array that is linked to a hashmap for continuity
          dataTracking.remove(socketChannel);
 
